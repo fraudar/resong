@@ -1,0 +1,87 @@
+name: Build Linux (.deb + .tar.gz)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "app/**"
+      - ".github/workflows/build-linux.yml"
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux GTK & media_kit build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libmpv-dev mpv dpkg-dev
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.9"
+          channel: "stable"
+          cache: true
+
+      - name: Install dependencies and verify
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+
+      - name: Build Linux release bundle
+        working-directory: app
+        run: flutter build linux --release
+
+      - name: Package portable tar.gz
+        run: |
+          mkdir -p dist/resong-linux-x64
+          cp -r app/build/linux/x64/release/bundle/* dist/resong-linux-x64/
+          cp app/linux/packaging/dev.resong.resong.desktop dist/resong-linux-x64/
+          cp app/linux/packaging/install.sh dist/resong-linux-x64/
+          chmod +x dist/resong-linux-x64/resong dist/resong-linux-x64/install.sh
+          tar -czf resong-linux-x64.tar.gz -C dist resong-linux-x64
+
+      - name: Package Debian .deb
+        run: |
+          PKG=dist/deb/resong_0.1.0_amd64
+          mkdir -p "$PKG/DEBIAN" \
+                   "$PKG/opt/resong" \
+                   "$PKG/usr/local/bin" \
+                   "$PKG/usr/share/applications" \
+                   "$PKG/usr/share/icons/hicolor/512x512/apps"
+
+          cp -r app/build/linux/x64/release/bundle/* "$PKG/opt/resong/"
+          cp app/linux/packaging/resong.png "$PKG/usr/share/icons/hicolor/512x512/apps/dev.resong.resong.png"
+          cp app/linux/packaging/dev.resong.resong.desktop "$PKG/usr/share/applications/dev.resong.resong.desktop"
+          ln -s /opt/resong/resong "$PKG/usr/local/bin/resong"
+
+          printf '%s\n' \
+            'Package: resong' \
+            'Version: 0.1.0' \
+            'Section: sound' \
+            'Priority: optional' \
+            'Architecture: amd64' \
+            'Depends: libgtk-3-0, libmpv2 | libmpv1' \
+            'Maintainer: resong contributors' \
+            'Description: Player de musica multiplataforma leve e standalone' \
+            > "$PKG/DEBIAN/control"
+
+          dpkg-deb --build --root-owner-group "$PKG" resong-linux-x64.deb
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: resong-linux-x64
+          path: |
+            resong-linux-x64.deb
+            resong-linux-x64.tar.gz

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=resong
+Comment=Player de musica multiplataforma leve e standalone
+Exec=/opt/resong/resong %U
+Icon=dev.resong.resong
+Type=Application
+Categories=AudioVideo;Audio;Player;
+StartupWMClass=dev.resong.resong
+Terminal=false

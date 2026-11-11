@@ -1,0 +1,59 @@
+# Environment & secrets
+.env
+.env.*
+!.env.example
+*.db
+*.db-*
+*.sqlite
+*.log
+
+# OS & IDEs
+.DS_Store
+Thumbs.db
+*.swp
+*.iml
+.idea/
+.vscode/
+
+# Keystores, signing & NDK
+**/key.properties
+**/*.keystore
+**/*.jks
+**/.cxx/
+**/xcuserdata/
+
+# Flutter / Dart build artifacts
+app/.dart_tool/
+app/.packages
+app/.pub-cache/
+app/.pub/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/build/
+app/.widget_preview/
+app/coverage/
+app/**/*.freezed.dart
+app/**/*.g.dart
+app/android/.gradle/
+app/android/local.properties
+app/android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+app/android/app/debug/
+app/android/app/profile/
+app/android/app/release/
+app/windows/flutter/ephemeral/
+app/linux/flutter/ephemeral/
+app/ios/Flutter/ephemeral/
+app/ios/Flutter/.last_build_id
+app/ios/Flutter/Generated.xcconfig
+app/ios/Flutter/flutter_export_environment.sh
+app/ios/Flutter/App.framework
+app/ios/Flutter/Flutter.framework
+app/ios/Flutter/Flutter.podspec
+app/ios/Runner/GeneratedPluginRegistrant.*
+app/ios/Pods/
+app/ios/.symlinks/
+*.ipa
+
+# Build artifacts
+releases/
+node_modules/
