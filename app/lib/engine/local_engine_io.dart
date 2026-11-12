@@ -42,15 +42,32 @@ class LocalEngineServer {
 
   Future<int> _startInternal() async {
     if (_server != null) return _server!.port;
+    _log('ensureReady...');
     await LocalStore.instance.ensureReady();
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     _server = server;
     Api.instance.setBaseUrl('http://127.0.0.1:${server.port}');
+    _log('bound port=${server.port}');
     unawaited(_serveLoop(server));
+    // Auto-ping: o processo consegue falar com o próprio socket?
+    unawaited(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      try {
+        final c = HttpClient();
+        final req = await c.getUrl(Uri.parse('http://127.0.0.1:${server.port}/api/health'));
+        final resp = await req.close().timeout(const Duration(seconds: 3));
+        final body = await resp.transform(utf8.decoder).join();
+        _log('self-ping status=${resp.statusCode} body=$body');
+        c.close(force: true);
+      } catch (e) {
+        _log('self-ping FALHOU: $e');
+      }
+    }());
     return server.port;
   }
 
   Future<void> stop() async {
+    _log('stop() chamado\n${StackTrace.current}');
     _starting = null;
     await _server?.close(force: true);
     _server = null;
@@ -59,9 +76,29 @@ class LocalEngineServer {
   }
 
   Future<void> _serveLoop(HttpServer server) async {
-    await for (final req in server) {
-      unawaited(_dispatch(req));
+    try {
+      await for (final req in server) {
+        _log('${req.method} ${req.uri.path}');
+        unawaited(_dispatch(req));
+      }
+      _log('serveLoop COMPLETO (stream fechou)');
+    } catch (e, st) {
+      _log('serveLoop ERRO: $e\n$st');
     }
+  }
+
+  // Log em arquivo com flush imediato — stdout redirecionado pode bufferar.
+  void _log(String msg) {
+    try {
+      final f = File(
+        '${Directory.systemTemp.path}${Platform.pathSeparator}resong_engine.log',
+      );
+      f.writeAsStringSync(
+        '${DateTime.now().toIso8601String()} $msg\n',
+        mode: FileMode.append,
+      );
+    } catch (_) {}
+    stdout.writeln('[engine] $msg');
   }
 
   void _setCors(HttpResponse res) {
@@ -588,6 +625,7 @@ class LocalEngineServer {
           progressive: progressive,
           forDownload: forDownload,
         );
+        _log('stream $id resolve kind=${resolved.kind} host=${Uri.tryParse(resolved.url)?.host}');
 
         if (progressive && resolved.kind != 'direct') {
           await _sendJson(req.response, 502, {'error': 'Stream progressivo indisponível', 'code': 'unavailable'});
@@ -621,26 +659,24 @@ class LocalEngineServer {
           return;
         }
 
-        final upstreamReq = await _http.getUrl(Uri.parse(resolved.url));
-        upstreamReq.headers.set(HttpHeaders.userAgentHeader, kEngineUserAgent);
-        final range = req.headers.value(HttpHeaders.rangeHeader);
-        if (range != null && range.isNotEmpty) {
-          upstreamReq.headers.set(HttpHeaders.rangeHeader, range);
-        }
-        final upstreamRes = await upstreamReq.close();
-
-        if ((upstreamRes.statusCode == 401 || upstreamRes.statusCode == 403) && attempt == 0) {
-          await upstreamRes.drain<void>().catchError((Object _) {});
+        final finished = await _serveDirectMedia(
+          req,
+          resolved.url,
+          resolved.mime,
+          firstAttempt: attempt == 0,
+        );
+        if (!finished) {
           engineCache.deletePrefix('stream:');
           continue;
         }
-
-        await _pipeUpstreamResponse(req.response, upstreamRes);
+        _log('stream $id fim');
         return;
       } on ResolveException catch (e) {
+        _log('stream $id RESOLVE ERRO ${e.status}: ${e.message}');
         await _sendJson(req.response, e.status, {'error': e.message, 'code': e.code});
         return;
-      } catch (e) {
+      } catch (e, st) {
+        _log('stream $id ERRO tentativa $attempt: $e\n$st');
         if (attempt == 1) {
           await _sendJson(req.response, 502, {'error': e.toString(), 'code': 'unavailable'});
           return;
@@ -661,9 +697,6 @@ class LocalEngineServer {
       progressive: true,
       forDownload: true,
     );
-    final upstreamReq = await _http.getUrl(Uri.parse(resolved.url));
-    upstreamReq.headers.set(HttpHeaders.userAgentHeader, kEngineUserAgent);
-    final upstreamRes = await upstreamReq.close();
 
     final ext = extFromMime(resolved.mime, resolved.url);
     final rawName = '${artists.isNotEmpty ? '${artists.first} - ' : ''}${qp['title'] ?? 'track'}';
@@ -671,7 +704,7 @@ class LocalEngineServer {
     final fileName = '${safeName.isEmpty ? 'resong' : safeName}.$ext';
 
     req.response.headers.set('content-disposition', 'attachment; filename="$fileName"');
-    await _pipeUpstreamResponse(req.response, upstreamRes);
+    await _serveDirectMedia(req, resolved.url, resolved.mime, firstAttempt: false);
   }
 
   Future<void> _handleHlsProxy(HttpRequest req) async {
@@ -747,6 +780,304 @@ class LocalEngineServer {
       }
     }
     return out.join('\n');
+  }
+
+  static const int _mediaChunkSize = 1024 * 1024;
+
+  /// Serve mídia direta em blocos fechados de 1 MiB.
+  ///
+  /// O googlevideo rejeita `Range: bytes=0-` (aberto) e pedidos sem Range com
+  /// 403, mas aceita `bytes=a-b` fechado. mpv/ffmpeg e ExoPlayer pedem aberto —
+  /// por isso o motor costura os blocos e serve ao cliente com o Range pedido.
+  ///
+  /// Devolve `false` só quando o upstream nega o range na primeira tentativa:
+  /// o chamador limpa o cache e re-resolve a URL. Nos demais casos a resposta
+  /// já foi enviada e devolve `true`.
+  Future<bool> _serveDirectMedia(
+    HttpRequest req,
+    String url,
+    String mime, {
+    required bool firstAttempt,
+  }) async {
+    final out = req.response;
+    final clientRange = _parseByteRange(req.headers.value(HttpHeaders.rangeHeader));
+
+    // Range normal começa direto no offset pedido; só o sufixo (`bytes=-N`)
+    // precisa do bloco zero para descobrir o total.
+    final firstStart = (clientRange != null && clientRange.suffix == null)
+        ? clientRange.start
+        : 0;
+    final firstEnd = firstStart + _mediaChunkSize - 1;
+
+    HttpClientResponse upstream;
+    try {
+      upstream = await _openRange(url, firstStart, firstEnd);
+    } catch (e) {
+      _log('media connect erro: $e');
+      await _sendJson(out, 502, {'error': 'Upstream inacessível', 'code': 'upstream_unreachable'});
+      return true;
+    }
+
+    final code = upstream.statusCode;
+    _log('media upstream=$code bytes=$firstStart-$firstEnd');
+
+    if (code == 401 || code == 403) {
+      await upstream.drain<void>().catchError((Object _) {});
+      if (firstAttempt) return false;
+      await _sendJson(out, 502, {'error': 'Upstream negou a mídia ($code)', 'code': 'upstream_denied'});
+      return true;
+    }
+
+    if (code == 416) {
+      final total = _totalFromContentRange(upstream.headers.value(HttpHeaders.contentRangeHeader));
+      await upstream.drain<void>().catchError((Object _) {});
+      if (total != null) out.headers.set(HttpHeaders.contentRangeHeader, 'bytes */$total');
+      await _sendJson(out, 416, {'error': 'Range fora do arquivo', 'code': 'range_not_satisfiable'});
+      return true;
+    }
+
+    if (code != 200 && code != 206) {
+      final body = await utf8.decoder.bind(upstream).join().catchError((Object _) => '');
+      _log('media upstream erro $code: ${body.length > 200 ? body.substring(0, 200) : body}');
+      await _sendJson(out, 502, {'error': 'Upstream respondeu $code', 'code': 'upstream_error'});
+      return true;
+    }
+
+    final contentType = mime.isNotEmpty
+        ? mime
+        : (upstream.headers.value(HttpHeaders.contentTypeHeader) ?? 'application/octet-stream');
+
+    if (code == 200) {
+      // Upstream ignorou o Range e mandou o arquivo inteiro.
+      final total = upstream.contentLength >= 0 ? upstream.contentLength : null;
+      final resolved = total == null ? null : _resolveByteRange(clientRange, total);
+      if (total != null && resolved == null) {
+        await upstream.drain<void>().catchError((Object _) {});
+        out.headers.set(HttpHeaders.contentRangeHeader, 'bytes */$total');
+        await _sendJson(out, 416, {'error': 'Range fora do arquivo', 'code': 'range_not_satisfiable'});
+        return true;
+      }
+      final start = resolved?.start ?? 0;
+      final end = resolved?.end;
+      final contentRange = (clientRange != null && total != null && end != null)
+          ? 'bytes $start-$end/$total'
+          : null;
+      await _writeMediaHeaders(
+        out,
+        contentType,
+        total == null ? null : end! - start + 1,
+        contentRange,
+      );
+      out.bufferOutput = false;
+      try {
+        await _copyMediaWindow(upstream, out, start, end);
+        await out.close();
+      } catch (e) {
+        _log('media cliente saiu (200): $e');
+        try {
+          await out.close();
+        } catch (_) {}
+      }
+      return true;
+    }
+
+    // 206 do upstream: o total vem no Content-Range.
+    final contentRangeHeader = upstream.headers.value(HttpHeaders.contentRangeHeader);
+    final total = _totalFromContentRange(contentRangeHeader);
+    final upstreamStart = _startFromContentRange(contentRangeHeader) ?? firstStart;
+    _log('media 206 total=$total start=$upstreamStart');
+
+    final resolved = total == null ? null : _resolveByteRange(clientRange, total);
+    if (total != null && resolved == null) {
+      await upstream.drain<void>().catchError((Object _) {});
+      out.headers.set(HttpHeaders.contentRangeHeader, 'bytes */$total');
+      await _sendJson(out, 416, {'error': 'Range fora do arquivo', 'code': 'range_not_satisfiable'});
+      return true;
+    }
+
+    final bodyStart = resolved?.start ?? (clientRange == null ? 0 : clientRange.start);
+    final bodyEnd = resolved?.end ?? clientRange?.end;
+    final lastByte = total == null ? bodyEnd : (bodyEnd ?? total - 1);
+    final outRange = (total != null && clientRange != null && lastByte != null)
+        ? 'bytes $bodyStart-$lastByte/$total'
+        : null;
+
+    await _writeMediaHeaders(
+      out,
+      contentType,
+      (total != null && lastByte != null) ? lastByte - bodyStart + 1 : null,
+      outRange,
+    );
+    out.bufferOutput = false;
+
+    try {
+      var current = upstream;
+      var chunkStart = upstreamStart;
+      var pending = true;
+      while (pending) {
+        pending = false;
+        var read = 0;
+        var hitLimit = false;
+        await for (final data in current) {
+          final dataStart = chunkStart + read;
+          read += data.length;
+          final dataEnd = dataStart + data.length - 1;
+          if (bodyEnd != null && dataEnd < bodyStart) continue;
+          final from = dataStart < bodyStart ? bodyStart - dataStart : 0;
+          var to = data.length;
+          if (bodyEnd != null) {
+            final room = bodyEnd - dataStart + 1;
+            to = room <= 0 ? 0 : (room < to ? room : to);
+          }
+          if (to > from) {
+            out.add(from == 0 && to == data.length ? data : data.sublist(from, to));
+            await out.flush();
+          }
+          if (bodyEnd != null && dataEnd >= bodyEnd) {
+            hitLimit = true;
+            break;
+          }
+        }
+        if (hitLimit) break;
+
+        var nextStart = chunkStart + read;
+        // Range de sufixo: o primeiro bloco pode ficar inteiro antes do alvo.
+        if (bodyStart > nextStart) nextStart = bodyStart;
+        if (total != null && nextStart >= total) break;
+        if (bodyEnd != null && nextStart > bodyEnd) break;
+        if (read == 0) break;
+
+        final wantEnd = nextStart + _mediaChunkSize - 1;
+        final clippedEnd = (bodyEnd != null && bodyEnd < wantEnd) ? bodyEnd : wantEnd;
+        HttpClientResponse next;
+        try {
+          next = await _openRange(url, nextStart, clippedEnd);
+        } catch (e) {
+          _log('media chunk $nextStart-$clippedEnd erro: $e');
+          break;
+        }
+        if (next.statusCode == 416) {
+          await next.drain<void>().catchError((Object _) {});
+          break;
+        }
+        if (next.statusCode != 200 && next.statusCode != 206) {
+          await next.drain<void>().catchError((Object _) {});
+          _log('media chunk $nextStart-$clippedEnd status=${next.statusCode}');
+          break;
+        }
+        chunkStart = nextStart;
+        current = next;
+        pending = true;
+      }
+      await out.close();
+    } catch (e) {
+      _log('media cliente saiu (206): $e');
+      try {
+        await out.close();
+      } catch (_) {}
+    }
+    return true;
+  }
+
+  Future<HttpClientResponse> _openRange(String url, int start, int end) async {
+    final upstreamReq = await _http.getUrl(Uri.parse(url));
+    upstreamReq.headers.set(HttpHeaders.userAgentHeader, kEngineUserAgent);
+    upstreamReq.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
+    // O googlevideo encerra o socket depois de cada resposta; reutilizar a
+    // conexão keep-alive faz o bloco seguinte morrer sem header.
+    upstreamReq.headers.set(HttpHeaders.connectionHeader, 'close');
+    upstreamReq.headers.set(HttpHeaders.rangeHeader, 'bytes=$start-$end');
+    return upstreamReq.close();
+  }
+
+  Future<void> _writeMediaHeaders(
+    HttpResponse out,
+    String contentType,
+    int? length,
+    String? contentRange,
+  ) async {
+    _setCors(out);
+    out.statusCode = contentRange != null ? HttpStatus.partialContent : HttpStatus.ok;
+    out.headers.set(HttpHeaders.contentTypeHeader, contentType);
+    out.headers.set('accept-ranges', 'bytes');
+    out.headers.set('cache-control', 'no-store');
+    if (length != null) out.headers.set(HttpHeaders.contentLengthHeader, '$length');
+    if (contentRange != null) out.headers.set(HttpHeaders.contentRangeHeader, contentRange);
+  }
+
+  Future<void> _copyMediaWindow(
+    Stream<List<int>> stream,
+    HttpResponse out,
+    int start,
+    int? end,
+  ) async {
+    var pos = 0;
+    await for (final data in stream) {
+      final dataStart = pos;
+      pos += data.length;
+      if (end != null && dataStart > end) break;
+      final from = dataStart < start ? start - dataStart : 0;
+      var to = data.length;
+      if (end != null) {
+        final room = end - dataStart + 1;
+        to = room <= 0 ? 0 : (room < to ? room : to);
+      }
+      if (to > from) {
+        out.add(from == 0 && to == data.length ? data : data.sublist(from, to));
+        await out.flush();
+      }
+    }
+  }
+
+  _ByteRange? _parseByteRange(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    final t = raw.trim().toLowerCase();
+    if (!t.startsWith('bytes=')) return null;
+    final spec = t.substring(6).split(',').first.trim();
+    final dash = spec.indexOf('-');
+    if (dash < 0) return null;
+    final left = spec.substring(0, dash).trim();
+    final right = spec.substring(dash + 1).trim();
+    if (left.isEmpty) {
+      final n = int.tryParse(right);
+      if (n == null || n <= 0) return null;
+      return _ByteRange(suffix: n);
+    }
+    final start = int.tryParse(left);
+    if (start == null || start < 0) return null;
+    if (right.isEmpty) return _ByteRange(start: start);
+    final end = int.tryParse(right);
+    if (end == null || end < start) return null;
+    return _ByteRange(start: start, end: end);
+  }
+
+  _ResolvedByteRange? _resolveByteRange(_ByteRange? range, int total) {
+    if (total <= 0) return null;
+    if (range == null) return _ResolvedByteRange(0, total - 1);
+    if (range.suffix != null) {
+      final n = range.suffix!;
+      if (n <= 0) return null;
+      final start = total - n < 0 ? 0 : total - n;
+      return _ResolvedByteRange(start, total - 1);
+    }
+    if (range.start >= total) return null;
+    final end = range.end == null
+        ? total - 1
+        : (range.end! < total ? range.end! : total - 1);
+    if (end < range.start) return null;
+    return _ResolvedByteRange(range.start, end);
+  }
+
+  int? _totalFromContentRange(String? value) {
+    if (value == null || value.isEmpty) return null;
+    final m = RegExp(r'/\s*(\d+)\s*$').firstMatch(value);
+    return m == null ? null : int.tryParse(m.group(1)!);
+  }
+
+  int? _startFromContentRange(String? value) {
+    if (value == null || value.isEmpty) return null;
+    final m = RegExp(r'bytes\s+(\d+)-').firstMatch(value);
+    return m == null ? null : int.tryParse(m.group(1)!);
   }
 
   Future<void> _pipeUpstreamResponse(HttpResponse out, HttpClientResponse upstream) async {
@@ -1173,6 +1504,21 @@ class LocalEngineServer {
 
     await _sendJson(res, 404, {'error': 'rota não encontrada'});
   }
+}
+
+class _ByteRange {
+  const _ByteRange({this.start = 0, this.end, this.suffix});
+
+  final int start;
+  final int? end;
+  final int? suffix;
+}
+
+class _ResolvedByteRange {
+  const _ResolvedByteRange(this.start, this.end);
+
+  final int start;
+  final int end;
 }
 
 Future<void> ensureLocalEngineStarted() async {

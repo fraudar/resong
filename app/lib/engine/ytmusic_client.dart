@@ -1117,6 +1117,86 @@ class YtMusicClient {
 
   // ---------------- Stream Resolution ----------------
 
+  static const _androidUa =
+      'com.google.android.youtube/20.10.38 (Linux; U; Android 11) gzip';
+
+  /// Player Innertube da web/Android. O `params=2AMB` (suite de testes) é o
+  /// que devolve URLs sem PO token — sem ele o googlevideo corta ranges em
+  /// ~1 MiB e recusa `Range: bytes=0-`. Com ele, qualquer bloco responde 206.
+  Future<ResolvedStreamResult?> _resolveViaPlayer(String videoId) async {
+    try {
+      final res = await engineDio.post<Map<String, dynamic>>(
+        'https://www.youtube.com/youtubei/v1/player?prettyPrint=false',
+        data: {
+          'context': {
+            'client': {
+              'clientName': 'ANDROID',
+              'clientVersion': '20.10.38',
+              'userAgent': _androidUa,
+              'hl': 'pt',
+              'gl': 'BR',
+              'timeZone': 'UTC',
+              'utcOffsetMinutes': 0,
+              'osName': 'Android',
+              'osVersion': '11',
+            },
+          },
+          'videoId': videoId,
+          'params': '2AMB',
+        },
+        options: Options(
+          headers: {
+            'content-type': 'application/json',
+            'user-agent': _androidUa,
+            'x-youtube-client-name': '3',
+            'x-youtube-client-version': '20.10.38',
+            'origin': 'https://www.youtube.com',
+          },
+          receiveTimeout: const Duration(seconds: 20),
+        ),
+      );
+      final data = res.data;
+      if (res.statusCode != 200 || data == null) return null;
+      final status = (data['playabilityStatus'] as Map?)?['status'];
+      if (status != 'OK') return null;
+
+      final formats = ((data['streamingData'] as Map?)?['adaptiveFormats'] as List?) ?? const [];
+      Map? bestMp4;
+      Map? bestAny;
+      for (final raw in formats.whereType<Map>()) {
+        final mime = (raw['mimeType'] ?? '').toString();
+        if (!mime.startsWith('audio/')) continue;
+        final url = (raw['url'] as String?)?.trim();
+        if (url == null || url.isEmpty) continue;
+        final bitrate = (raw['bitrate'] as num?)?.toInt() ?? 0;
+        if (mime.contains('mp4')) {
+          if (bestMp4 == null || bitrate > ((bestMp4['bitrate'] as num?)?.toInt() ?? 0)) {
+            bestMp4 = raw;
+          }
+        } else if (bestAny == null || bitrate > ((bestAny['bitrate'] as num?)?.toInt() ?? 0)) {
+          bestAny = raw;
+        }
+      }
+      final chosen = bestMp4 ?? bestAny;
+      if (chosen == null) return null;
+
+      final url = (chosen['url'] as String).trim();
+      final mime = (chosen['mimeType'] as String).split(';').first.trim();
+      registerAllowedHost(url);
+      final isHls = url.contains('.m3u8');
+      final ttlMs = isHls ? 3 * 3600 * 1000 : ttlMsFromUrl(url);
+      final now = DateTime.now().millisecondsSinceEpoch;
+      return ResolvedStreamResult(
+        kind: isHls ? 'hls' : 'direct',
+        url: url,
+        mime: isHls ? 'application/vnd.apple.mpegurl' : mime,
+        expiresAtMs: now + ttlMs,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<ResolvedStreamResult> resolveStream(
     String videoId, {
     String? title,
@@ -1130,6 +1210,13 @@ class YtMusicClient {
 
     String? streamUrl;
     String? mime;
+
+    final direct = await _resolveViaPlayer(videoId);
+    if (direct != null) {
+      final ttlMs = direct.expiresAtMs - now;
+      engineCache.set(cacheKey, direct, Duration(milliseconds: (ttlMs - 60000).clamp(60000, 5 * 3600 * 1000)));
+      return direct;
+    }
 
     try {
       final manifest = await _explode.videos.streams.getManifest(videoId);
