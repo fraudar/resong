@@ -50,7 +50,7 @@ class AudiusClient {
     final user = raw['user'] as Map?;
     final artist = (user?['name'] as String? ?? '').trim();
     final artMap = raw['artwork'] as Map?;
-    final art = (artMap?['480x480'] ?? artMap?['1000x1000'] ?? artMap?['150x150']) as String?;
+    final art = (artMap?['1000x1000'] ?? artMap?['480x480'] ?? artMap?['150x150']) as String?;
     final dur = (raw['duration'] as num?)?.toDouble();
     final isrc = (raw['isrc'] as String?)?.trim();
     final permalink = (raw['permalink'] as String?)?.trim();

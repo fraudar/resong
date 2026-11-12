@@ -2,7 +2,7 @@
 ; Para compilar: iscc app\windows\installer\resong.iss
 
 #define MyAppName "resong"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.2.0"
 #define MyAppPublisher "resong"
 #define MyAppExeName "resong.exe"
 

@@ -6,6 +6,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:solar_icons_flutter/solar_icons_flutter.dart';
 
+import '../core/artwork_url.dart';
 import '../core/palette.dart';
 import '../core/theme.dart';
 
@@ -493,10 +494,14 @@ class _CoverImage extends StatelessWidget {
       );
     }
     if (url == null || url!.isEmpty) return _fallback();
+    // O backdrop cobre a largura inteira do cabeçalho: vale pedir a maior capa.
+    final imageUrl = upgradeArtworkUrl(url, px: 1080);
     return CachedNetworkImage(
-      imageUrl: url!,
+      imageUrl: imageUrl ?? url!,
       fit: BoxFit.cover,
       alignment: Alignment.topCenter,
+      memCacheWidth: 1080,
+      fadeInDuration: const Duration(milliseconds: 160),
       placeholder: (_, __) => _fallback(),
       errorWidget: (_, __, ___) => _fallback(),
     );

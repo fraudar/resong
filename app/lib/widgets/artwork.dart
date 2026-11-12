@@ -5,6 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:solar_icons_flutter/solar_icons_flutter.dart';
 
+import '../core/artwork_url.dart';
 import '../core/theme.dart';
 
 /// Capa com canto arredondado, placeholder sutil e fallback quando a URL morre.
@@ -31,6 +32,10 @@ class Artwork extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.colors;
     final hasLocal = localBytes != null && localBytes!.isNotEmpty;
+    // Pede a resolução real de exibição: capa de 56 px em tela 3x precisa de 168.
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final px = (size * dpr).round().clamp(120, 1200);
+    final imageUrl = upgradeArtworkUrl(url, px: px);
     final child = hasLocal
         ? Image.memory(
             localBytes!,
@@ -40,13 +45,16 @@ class Artwork extends StatelessWidget {
             gaplessPlayback: true,
             errorBuilder: (_, __, ___) => _fallback(colors),
           )
-        : (url == null || url!.isEmpty
+        : (imageUrl == null || imageUrl.isEmpty
             ? _fallback(colors)
             : CachedNetworkImage(
-                imageUrl: url!,
+                imageUrl: imageUrl,
                 fit: BoxFit.cover,
                 width: size,
                 height: size,
+                memCacheWidth: px,
+                memCacheHeight: px,
+                fadeInDuration: const Duration(milliseconds: 120),
                 placeholder: (_, __) => Container(color: colors.surface),
                 errorWidget: (_, __, ___) => _fallback(colors),
               ));
