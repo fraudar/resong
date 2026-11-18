@@ -25,7 +25,7 @@ import 'player_screen.dart';
 import 'settings_screen.dart';
 
 /// Perfil editorial e compartilhável: identidade musical, artistas favoritos em destaque,
-/// faixas em rotação, modo privado e cartão pronto para compartilhar gostos musicais.
+/// faixas em rotação e cartão pronto para compartilhar gostos musicais.
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
 
@@ -37,7 +37,6 @@ class ProfileScreen extends ConsumerWidget {
     final playing = ref.watch(isPlayingProvider);
     final settings = ref.watch(settingsProvider);
     final waveEnabled = settings.waveEffectsEnabled;
-    final isPrivate = settings.profilePrivate;
     final currentTrack = ref.watch(currentTrackProvider);
 
     final identity = ref.watch(profileIdentityProvider);
@@ -57,7 +56,7 @@ class ProfileScreen extends ConsumerWidget {
     final minutesListened = computeListeningMinutes(scrobbles);
     final streakDays = computeListeningStreakDays(scrobbles);
 
-    final avatarBytes = isPrivate ? null : identity.avatarBytes;
+    final avatarBytes = identity.avatarBytes;
     final topPad = MediaQuery.paddingOf(context).top;
 
     return Scaffold(
@@ -85,26 +84,24 @@ class ProfileScreen extends ConsumerWidget {
                           style: Theme.of(context).textTheme.displayMedium?.copyWith(fontSize: 25),
                         ),
                         const Spacer(),
-                        if (!isPrivate) ...[
-                          GlassCircleButton(
-                            icon: SolarIconsBold.share,
-                            size: 38,
-                            iconSize: 17,
-                            tooltip: 'Compartilhar perfil',
-                            onTap: () => _openShareCard(
-                              context,
-                              identity: identity,
-                              palette: palette,
-                              totalScrobbles: scrobbles.length,
-                              minutesListened: minutesListened,
-                              uniqueArtists: uniqueArtists,
-                              topArtists: topArtists,
-                              topTracks: topTracks,
-                              avatarBytes: avatarBytes,
-                            ),
+                        GlassCircleButton(
+                          icon: SolarIconsBold.share,
+                          size: 38,
+                          iconSize: 17,
+                          tooltip: 'Compartilhar perfil',
+                          onTap: () => _openShareCard(
+                            context,
+                            identity: identity,
+                            palette: palette,
+                            totalScrobbles: scrobbles.length,
+                            minutesListened: minutesListened,
+                            uniqueArtists: uniqueArtists,
+                            topArtists: topArtists,
+                            topTracks: topTracks,
+                            avatarBytes: avatarBytes,
                           ),
-                          const SizedBox(width: 8),
-                        ],
+                        ),
+                        const SizedBox(width: 8),
                         GlassCircleButton(
                           icon: SolarIconsBold.settings,
                           size: 38,
@@ -151,12 +148,10 @@ class ProfileScreen extends ConsumerWidget {
                                       : DecoratedBox(
                                           decoration: BoxDecoration(color: accent.withValues(alpha: 0.22)),
                                           child: Center(
-                                            child: isPrivate
-                                                ? Icon(SolarIconsBold.lock, size: 28, color: colors.textPrimary)
-                                                : Text(
-                                                    identity.name.isEmpty ? 'R' : identity.name.characters.first.toUpperCase(),
-                                                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700, color: colors.textPrimary),
-                                                  ),
+                                            child: Text(
+                                              identity.name.isEmpty ? 'R' : identity.name.characters.first.toUpperCase(),
+                                              style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700, color: colors.textPrimary),
+                                            ),
                                           ),
                                         ),
                                 ),
@@ -196,47 +191,7 @@ class ProfileScreen extends ConsumerWidget {
                     ),
                   ),
                 ),
-                if (isPrivate)
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
-                      child: GlassSurface(
-                        borderRadius: BorderRadius.circular(24),
-                        blur: 22,
-                        padding: const EdgeInsets.all(24),
-                        child: Column(
-                          children: [
-                            Icon(SolarIconsBold.lock, size: 36, color: accent),
-                            const SizedBox(height: 14),
-                            Text(
-                              'Perfil privado',
-                              style: Theme.of(context).textTheme.titleLarge,
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              'Só você vê o que escuta. Métricas, artistas e histórico ficam ocultos enquanto o modo privado estiver ativo.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(fontSize: 13, color: colors.textSecondary, height: 1.4),
-                            ),
-                            const SizedBox(height: 18),
-                            FilledButton.icon(
-                              style: FilledButton.styleFrom(
-                                backgroundColor: colors.heroPillBg,
-                                foregroundColor: colors.heroPillFg,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
-                              ),
-                              onPressed: () => ref.read(settingsProvider.notifier).setProfilePrivate(false),
-                              icon: const Icon(SolarIconsBold.lockUnlocked, size: 17),
-                              label: const Text('Tornar perfil público', style: TextStyle(fontWeight: FontWeight.w700)),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  )
-                else ...[
-                  // Linha limpa de métricas + streak + ouvindo agora
+                // Linha limpa de métricas + streak + ouvindo agora
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(24, 12, 24, 6),
@@ -496,8 +451,7 @@ class ProfileScreen extends ConsumerWidget {
                         childCount: scrobbles.length.clamp(0, 5),
                       ),
                     ),
-                  ],
-                  // Ação discreta de privacidade e limpeza de histórico no rodapé do perfil
+                  // Ação de limpeza de histórico no rodapé do perfil
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(20, 22, 20, 8),
@@ -506,11 +460,6 @@ class ProfileScreen extends ConsumerWidget {
                         spacing: 12,
                         runSpacing: 6,
                         children: [
-                          TextButton.icon(
-                            onPressed: () => ref.read(settingsProvider.notifier).setProfilePrivate(true),
-                            icon: Icon(SolarIconsBold.lock, size: 15, color: colors.textTertiary),
-                            label: Text('Deixar privado', style: TextStyle(fontSize: 12, color: colors.textTertiary)),
-                          ),
                           if (scrobbles.isNotEmpty)
                             TextButton.icon(
                               onPressed: () => _confirmClearHistory(context, ref),

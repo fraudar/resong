@@ -14,7 +14,9 @@ import 'state/library.dart';
 import 'state/lyrics_cache.dart';
 import 'state/providers.dart';
 import 'state/scrobbles.dart';
+import 'state/updater.dart';
 import 'widgets/flight.dart';
+import 'widgets/update_dialog.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -78,7 +80,55 @@ class ResongApp extends ConsumerWidget {
       themeAnimationDuration: const Duration(milliseconds: 350),
       themeAnimationCurve: Curves.easeOutCubic,
       home: const Shell(),
+      builder: (context, child) => _AutoUpdateGate(child: child ?? const SizedBox.shrink()),
     );
+  }
+}
+
+/// Dispara a checagem ao abrir o app e mostra o progresso do auto-update.
+/// Fica abaixo do Navigator do MaterialApp para poder abrir o diálogo.
+class _AutoUpdateGate extends ConsumerStatefulWidget {
+  const _AutoUpdateGate({required this.child});
+  final Widget child;
+
+  @override
+  ConsumerState<_AutoUpdateGate> createState() => _AutoUpdateGateState();
+}
+
+class _AutoUpdateGateState extends ConsumerState<_AutoUpdateGate> {
+  bool _dialogOpen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ref.read(updaterProvider.notifier).check();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.listen<UpdateState>(updaterProvider, (previous, next) {
+      final shouldShow = next.phase == UpdatePhase.available ||
+          next.phase == UpdatePhase.downloading ||
+          next.phase == UpdatePhase.installing ||
+          next.phase == UpdatePhase.error;
+
+      if (shouldShow && !_dialogOpen) {
+        _dialogOpen = true;
+        showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => const UpdateDialog(),
+        ).whenComplete(() => _dialogOpen = false);
+        if (next.phase == UpdatePhase.available) {
+          ref.read(updaterProvider.notifier).downloadAndInstall();
+        }
+      } else if (next.phase == UpdatePhase.done && _dialogOpen) {
+        Navigator.of(context).maybePop();
+      }
+    });
+    return widget.child;
   }
 }
 

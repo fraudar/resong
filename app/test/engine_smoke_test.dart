@@ -40,4 +40,21 @@ void main() {
     stdout.writeln('[smoke] rodou com motor vivo: $alive');
     expect(alive, isTrue);
   }, timeout: const Timeout(Duration(seconds: 90)));
+
+  test('playlist local abre por playlist-ref sem 400', () async {
+    if (!LocalEngineServer.instance.isRunning) {
+      await LocalEngineServer.instance.start();
+    }
+    final created = await Api.instance.createPlaylist(
+      'Smoke${DateTime.now().millisecondsSinceEpoch}',
+    );
+    try {
+      final detail = await Api.instance.playlistRef(created.id);
+      expect(detail.ref.id, created.id);
+      expect(detail.ref.title, isNotEmpty);
+      expect(detail.tracks, isEmpty);
+    } finally {
+      await Api.instance.deletePlaylist(created.id);
+    }
+  }, timeout: const Timeout(Duration(seconds: 30)));
 }

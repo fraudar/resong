@@ -16,6 +16,7 @@ import '../state/providers.dart';
 import '../state/scrobbles.dart';
 import '../state/settings.dart';
 import '../state/sources.dart';
+import '../state/updater.dart';
 import '../widgets/glass.dart';
 import 'audio_fx_sheet.dart';
 
@@ -360,18 +361,6 @@ class SettingsScreen extends ConsumerWidget {
                     title: 'Privacidade',
                     child: Column(
                       children: [
-                        SwitchListTile.adaptive(
-                          value: settings.profilePrivate,
-                          activeTrackColor: mono,
-                          activeThumbColor: monoThumb,
-                          title: Text('Perfil privado', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: colors.textPrimary)),
-                          subtitle: Text(
-                            'Oculta métricas, artistas e histórico na tela de Perfil',
-                            style: TextStyle(fontSize: 12, color: colors.textSecondary),
-                          ),
-                          onChanged: (v) => ref.read(settingsProvider.notifier).setProfilePrivate(v),
-                        ),
-                        divider,
                         ListTile(
                           leading: Icon(SolarIconsLinear.trashBinTrash, color: colors.textPrimary),
                           title: Text(
@@ -388,6 +377,25 @@ class SettingsScreen extends ConsumerWidget {
                           onTap: () => _confirmClearHistory(context, ref),
                         ),
                       ],
+                    ),
+                  ),
+                ),
+                // Atualizações
+                SliverToBoxAdapter(
+                  child: _SettingsSection(
+                    title: 'Atualizações',
+                    child: ListTile(
+                      leading: Icon(SolarIconsLinear.refresh, color: colors.textPrimary),
+                      title: Text(
+                        'Verificar atualizações',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: colors.textPrimary),
+                      ),
+                      subtitle: Text(
+                        'O app também verifica e instala novas versões automaticamente ao abrir',
+                        style: TextStyle(fontSize: 12, color: colors.textSecondary),
+                      ),
+                      trailing: Icon(SolarIconsLinear.altArrowRight, size: 18, color: colors.textTertiary),
+                      onTap: () => ref.read(updaterProvider.notifier).check(force: true),
                     ),
                   ),
                 ),

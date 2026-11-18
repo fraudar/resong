@@ -23,11 +23,11 @@ Um unico app Flutter com motor local embutido em Dart para Windows, Linux, Andro
 | :--- | :--- | :--- | :--- |
 | Windows (x64) | Instalador (`.exe`) | `releases/resong-windows-x64.exe` | Instala em Programas, cria atalhos e desinstalador |
 | Linux (x64) | `.deb` e `.tar.gz` (CI) | [.github/workflows/build-linux.yml](.github/workflows/build-linux.yml) | Compila pacote Debian e portatil em `ubuntu-latest` |
-| Android | Pacote APK (`.apk`) | `releases/resong-android.apk` | Instalacao direta no aparelho |
+| Android | Pacote APK (`.apk`) | [.github/workflows/build-android.yml](.github/workflows/build-android.yml) | CI builda e anexa o APK na release ao enviar uma tag `v*` |
 | iOS | IPA via macOS / CI | [.github/workflows/build-ios.yml](.github/workflows/build-ios.yml) | Compila `.ipa` em runner `macos-latest` |
 
 > [!NOTE]
-> Builds nativos de Linux (`.deb`/`.tar.gz`) e iOS (`.ipa`) exigem seus respectivos sistemas/toolchains (Linux com GTK3/libmpv e macOS com Xcode). Ao subir este repositorio no GitHub, os workflows em `.github/workflows/` compilam ambos os pacotes automaticamente na nuvem.
+> Builds nativos de Linux (`.deb`/`.tar.gz`) e iOS (`.ipa`) exigem seus respectivos sistemas/toolchains (Linux com GTK3/libmpv e macOS com Xcode). Ao subir este repositorio no GitHub, os workflows em `.github/workflows/` compilam ambos os pacotes automaticamente na nuvem. O workflow Android gera o APK e publica a release na nuvem quando uma tag `v*` é enviada — nao e preciso buildar localmente.
 
 ---
 
@@ -51,7 +51,12 @@ Um unico app Flutter com motor local embutido em Dart para Windows, Linux, Andro
 ### Offline e Privacidade
 - **Downloads com tags:** faixas salvas localmente com metadados e capa embutidos direto no arquivo MP3/MP4 (`AudioTags`).
 - **Inicio resiliente offline:** sem internet ou com o feed remoto indisponivel, a tela inicial exibe banner de modo offline junto com downloads prontos, recentes, curtidas e suas playlists locais.
-- **Perfil simples e sem rastros externos:** usa apenas Nome de exibicao, bio e foto local (sem login ou `@usuario`), modo **Perfil privado** e limpeza imediata em **Configuracoes -> Privacidade -> Limpar historico de escutas**.
+- **Perfil simples e sem rastros externos:** usa apenas Nome de exibicao, bio e foto local (sem login ou `@usuario`), sempre publico e com limpeza imediata em **Configuracoes -> Privacidade -> Limpar historico de escutas**.
+
+### Auto-update
+- **Atualizacao automatica:** ao abrir, o app consulta o ultimo **GitHub Release** de `fraudar/resong`; se a tag for maior que a versao instalada, ele baixa o pacote da plataforma (`.apk` no Android, `.exe` no Windows, `.deb` no Linux) e abre o instalador, com barra de progresso e opcao de cancelar.
+- Tambem ha **Configuracoes -> Atualizacoes -> Verificar atualizacoes** para forcar a checagem. No iOS/macOS/Web (sem pacote instalavel) ele abre a pagina do release.
+- Para publicar uma atualizacao: incremente a versao no `pubspec.yaml` e envie uma tag `vX.Y.Z` maior que a versao anterior (`git tag vX.Y.Z && git push origin vX.Y.Z`). O workflow `.github/workflows/build-android.yml` builda o APK na nuvem e cria a release com o artefato `resong-android.apk` anexado.
 
 ---
 

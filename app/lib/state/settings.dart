@@ -11,7 +11,6 @@ class AppSettings {
     this.infiniteQueueEnabled = true,
     this.autoSkipEnabled = true,
     this.crossfadeSeconds = 0,
-    this.profilePrivate = false,
     this.downloadFolder = '',
   });
 
@@ -20,7 +19,6 @@ class AppSettings {
   final bool infiniteQueueEnabled;
   final bool autoSkipEnabled;
   final int crossfadeSeconds;
-  final bool profilePrivate;
   final String downloadFolder;
 
   AppSettings copyWith({
@@ -29,7 +27,6 @@ class AppSettings {
     bool? infiniteQueueEnabled,
     bool? autoSkipEnabled,
     int? crossfadeSeconds,
-    bool? profilePrivate,
     String? downloadFolder,
   }) =>
       AppSettings(
@@ -38,7 +35,6 @@ class AppSettings {
         infiniteQueueEnabled: infiniteQueueEnabled ?? this.infiniteQueueEnabled,
         autoSkipEnabled: autoSkipEnabled ?? this.autoSkipEnabled,
         crossfadeSeconds: crossfadeSeconds ?? this.crossfadeSeconds,
-        profilePrivate: profilePrivate ?? this.profilePrivate,
         downloadFolder: downloadFolder ?? this.downloadFolder,
       );
 }
@@ -53,7 +49,6 @@ class SettingsController extends StateNotifier<AppSettings> {
   static const _infiniteQueueKey = 'resong_infinite_queue';
   static const _autoSkipKey = 'resong_auto_skip';
   static const _crossfadeKey = 'resong_crossfade_seconds';
-  static const _profilePrivateKey = 'resong_profile_private';
   static const _downloadFolderKey = 'resong_download_folder';
 
   Future<void> _load() async {
@@ -65,7 +60,6 @@ class SettingsController extends StateNotifier<AppSettings> {
         infiniteQueueEnabled: prefs.getBool(_infiniteQueueKey) ?? true,
         autoSkipEnabled: prefs.getBool(_autoSkipKey) ?? true,
         crossfadeSeconds: (prefs.getInt(_crossfadeKey) ?? 0).clamp(0, 12),
-        profilePrivate: prefs.getBool(_profilePrivateKey) ?? false,
         downloadFolder: prefs.getString(_downloadFolderKey) ?? '',
       );
     } catch (_) {}
@@ -109,14 +103,6 @@ class SettingsController extends StateNotifier<AppSettings> {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt(_crossfadeKey, clamped);
-    } catch (_) {}
-  }
-
-  Future<void> setProfilePrivate(bool isPrivate) async {
-    state = state.copyWith(profilePrivate: isPrivate);
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_profilePrivateKey, isPrivate);
     } catch (_) {}
   }
 

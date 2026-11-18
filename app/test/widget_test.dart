@@ -187,11 +187,11 @@ void main() {
     await tester.scrollUntilVisible(find.text('Internet Archive'), 200, scrollable: find.byType(Scrollable).first);
     expect(find.text('Internet Archive'), findsOneWidget);
 
-    await tester.scrollUntilVisible(find.text('Perfil privado'), 250, scrollable: find.byType(Scrollable).first);
+    await tester.scrollUntilVisible(find.text('Pasta de downloads'), 250, scrollable: find.byType(Scrollable).first);
     expect(find.text('Pasta de downloads'), findsOneWidget);
     expect(find.text('Token do ListenBrainz'), findsNothing);
     expect(find.text('Conta Last.fm'), findsNothing);
-    expect(find.text('Perfil privado'), findsOneWidget);
+    expect(find.text('Perfil privado'), findsNothing);
     expect(find.text('Apagar todos os dados'), findsNothing);
     expect(find.text('Apagar dados'), findsNothing);
 
@@ -210,7 +210,7 @@ void main() {
     expect(container.read(scrobblesProvider), isEmpty);
   });
 
-  testWidgets('ProfileScreen oculta estatísticas no modo privado e alterna de volta sem opção de apagar dados', (tester) async {
+  testWidgets('ProfileScreen é sempre público: mostra estatísticas e não oferece modo privado', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final fakeHandler = ResongHandler();
     await tester.pumpWidget(
@@ -227,17 +227,12 @@ void main() {
 
     final container = ProviderScope.containerOf(tester.element(find.byType(ProfileScreen)));
     await container.read(settingsProvider.notifier).setWaveEffects(false);
-    await container.read(settingsProvider.notifier).setProfilePrivate(true);
     await tester.pumpAndSettle();
 
-    expect(find.text('Perfil privado'), findsOneWidget);
+    expect(find.text('Perfil privado'), findsNothing);
+    expect(find.text('Deixar privado'), findsNothing);
     expect(find.text('Apagar todos os dados'), findsNothing);
-    expect(find.text('Artistas do meu som'), findsNothing);
-
-    await tester.tap(find.text('Tornar perfil público'));
-    await tester.pumpAndSettle();
     expect(find.text('Artistas do meu som'), findsOneWidget);
-    expect(find.text('Deixar privado'), findsOneWidget);
     expect(find.text('Apagar dados'), findsNothing);
   });
 
@@ -592,9 +587,7 @@ void main() {
   test('SettingsController persiste preferências locais sem chaves de scrobble externo', () async {
     SharedPreferences.setMockInitialValues({});
     final ctrl = SettingsController();
-    await ctrl.setProfilePrivate(true);
     await ctrl.setCrossfadeSeconds(6);
-    expect(ctrl.state.profilePrivate, isTrue);
     expect(ctrl.state.crossfadeSeconds, 6);
   });
 

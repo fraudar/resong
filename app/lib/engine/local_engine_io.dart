@@ -186,7 +186,17 @@ class LocalEngineServer {
         await _sendJson(res, 200, {
           'sections': sections,
           'recent_tracks': LocalStore.instance.listRecent(limit: 12),
-          'playlists': LocalStore.instance.listPlaylists(limit: 8),
+          // Playlists locais normalizadas pro formato PlaylistRef (title/source/owner),
+          // senão o card do feed abre com título vazio e ID pl_ sem rota (400).
+          'playlists': [
+            for (final pl in LocalStore.instance.listPlaylists(limit: 8))
+              {
+                ...pl,
+                'source': 'local',
+                'title': pl['name'] ?? '',
+                'owner': 'Você',
+              },
+          ],
         });
         return;
       }
@@ -567,6 +577,30 @@ class LocalEngineServer {
   }
 
   Future<void> _handlePlaylistRef(HttpResponse res, String id) async {
+    // Playlists criadas no app (pl_...) são locais. Antes caíam no 400 genérico
+    // quando abertas pelo feed inicial ("Suas playlists").
+    if (id.startsWith('pl_')) {
+      final pl = LocalStore.instance.getPlaylist(id);
+      if (pl == null) {
+        await _sendJson(res, 404, {'error': 'Playlist não encontrada'});
+        return;
+      }
+      final tracks = (pl['tracks'] as List?) ?? const <dynamic>[];
+      await _sendJson(res, 200, {
+        'playlist': {
+          'id': id,
+          'source': 'local',
+          'title': pl['name'] ?? 'Playlist',
+          'owner': 'Você',
+          'artwork': pl['artwork'],
+          'track_count': pl['track_count'] ?? tracks.length,
+          'description': pl['description'],
+        },
+        'tracks': tracks,
+      });
+      return;
+    }
+
     Map<String, dynamic>? data;
     if (id.startsWith('ytpl:')) {
       data = await YtMusicClient.instance.playlist(id.substring(5));
