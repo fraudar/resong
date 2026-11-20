@@ -1,0 +1,71 @@
+name: Build Windows (.exe) e release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Tag da release para buildar/anexar (ex: v0.2.1)'
+        required: true
+        default: 'v0.2.1'
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.9"
+          channel: "stable"
+          cache: true
+
+      - name: Install dependencies and verify
+        working-directory: app
+        shell: bash
+        run: |
+          flutter pub get
+          flutter analyze
+
+      - name: Ajustar versão do instalador
+        shell: pwsh
+        run: |
+          $tag = "${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}"
+          $ver = $tag.TrimStart('v')
+          (Get-Content app/windows/installer/resong.iss) -replace '#define MyAppVersion ".*"', "#define MyAppVersion `"$ver`"" | Set-Content app/windows/installer/resong.iss
+
+      - name: Build Windows release
+        working-directory: app
+        run: flutter build windows --release
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "app\windows\installer\resong.iss"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: resong-windows-x64
+          path: releases/resong-windows-x64.exe
+
+      - name: Publish release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+          files: releases/resong-windows-x64.exe
+          fail_on_unmatched_files: true
